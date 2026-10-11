@@ -408,6 +408,57 @@ iverilog -o sim.vvp \
 vvp sim.vvp
 ```
 
+### Full Address-Derivation Pipeline (SHA-256 + RIPEMD-160 + HIT)
+
+> Contribuição integrada e **validada em simulação (Icarus Verilog, 6/6 testes)**.
+
+Extensão deste projeto para o fluxo completo de derivação de endereço Bitcoin no hardware:
+
+```
+privkey → secp256k1 (k·G) → pubkey(comp) → SHA-256 → RIPEMD-160 → hash160
+                                                                        ↓
+                                               hit_detect (hash160 == alvo?) → HIT
+```
+
+**Módulos** (pasta `pipeline/`):
+
+| Módulo | Função |
+|---|---|
+| `sha256_core.v` | Núcleo SHA-256 (1 bloco, FSM de 64 rodadas) |
+| `ripemd160_core.v` | Núcleo RIPEMD-160 (80 rodadas, 2 linhas, LE) |
+| `pad_block.v` | Padding SHA-2 (BE p/ SHA-256, LE p/ RIPEMD-160) |
+| `hit_detect.v` | Comparador hash160 × alvo (N targets) → `hit`/`hit_id` |
+| `tb_pipeline.v` | Testbench integrado wNAF + hash + hit |
+
+**Resultados da simulação:**
+
+```
+SHA-256('abc')  PASS
+RIPEMD-160('abc') PASS  → f708b28e7a985de08e4a049b87b0c698fc0b5af1
+PIPELINE  PASS: hash160(key=7) = f9fbed5dd49d59ea806acae372c433b3693f0bfd
+                (bytes LE 5dedfbf9ea599dd4e3ca6a80b333c472fd0b3f69)
+                endereco = 19ZewH8Kk1PDbSNdJ97FP4EiCjTRaZMZQA (puzzle #3)
+HIT-DETECT PASS: key=7  -> hit=1 (id=0)
+HIT-DETECT NEG PASS: key=8 -> NAO bateu
+RESUMO: pass=6  fail=0
+```
+
+Ciclos por bloco (simulação): SHA-256 ≈ 66–70, RIPEMD-160 ≈ 82–86, ponto-adição ≈ 12.
+
+#### FPGA (integrado) vs GPU
+
+| Métrica | FPGA (integração) | GPU (RTX 3090, KeyHunt/BitCrack) |
+|---|---|---|
+| Pipeline completo | EC + SHA-256 + RIPEMD-160 + hit | idem (já integrado) |
+| Ciclos por chave | ~160–170 | — |
+| Chaves/s (est.) | ~0,5 Mkey/s/lane; 4–8 lanes → **2–4 Mkey/s/board** | **~1–2 Gkey/s** |
+| Eficiência energética | ~0,3–0,5 W → **~4–10 Mkey/J** | 350 W → ~3–6 kkey/J (~1.000× pior) |
+| Custo | board Artix-7 ~US$ 100–400 | ~US$ 1.500 |
+| Custo / Mkey/s | ~US$ 100–200 | ~US$ 750–1.500 |
+| Estado | Funcional na simulação; falta síntese/medição | Maduro/validado |
+
+> Cuidado: os **318M adds/s** do README são apenas da aritmética de ponto-adição (sem pipeline de hash); com SHA-256 + RIPEMD-160 no caminho a vazão real cai para a casa de **Mkey/s** por board. GPU vence em vazão bruta; FPGA vence em eficiência energética.
+
 ### Vivado Synthesis
 
 1. Create new RTL project
